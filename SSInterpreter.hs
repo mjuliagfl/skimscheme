@@ -49,6 +49,13 @@ eval env (List (Atom "begin":[v])) = eval env v
 eval env (List (Atom "begin": l: ls)) = (eval env l) >>= (\v -> case v of { (error@(Error _)) -> return error; otherwise -> eval env (List (Atom "begin": ls))})
 eval env (List (Atom "begin":[])) = return (List [])
 eval env lam@(List (Atom "lambda":(List formals):body:[])) = return lam
+eval env iff@(List (Atom "if":cond:consequent:alternate:[])) = 
+  eval env cond 
+      >>= (\v -> case v of 
+            (Bool True) -> eval env consequent
+            (Bool False) -> eval env alternate
+            error@(Error _) -> return error
+            otherwise -> return (Error ("Not a conditional"));)
 -- The following line is slightly more complex because we are addressing the
 -- case where define is redefined by the user (whatever is the user's reason
 -- for doing so. The problem is that redefining define does not have
@@ -124,7 +131,14 @@ environment =
           $ insert "*"              (Native numericMult) 
           $ insert "-"              (Native numericSub) 
           $ insert "car"            (Native car)           
-          $ insert "cdr"            (Native cdr)           
+          $ insert "cdr"            (Native cdr)
+          $ insert "=="             (Native equals)
+          $ insert "!="             (Native notEquals)
+          $ insert ">"              (Native greater)
+          $ insert ">="             (Native greaterOrEquals)
+          $ insert "<"              (Native less)
+          $ insert "<="             (Native lessOrEquals)
+
             empty
 
 type StateT = Map String LispVal
@@ -151,6 +165,54 @@ instance Monad StateTransformer where
 -- Includes some auxiliary functions. Does not include functions that modify
 -- state. These functions, such as define and set!, must run within the
 -- StateTransformer monad. 
+
+equals :: [LispVal] -> LispVal
+equals (f:a:[]) 
+  | onlyNumbers (f:a:[]) = (Bool ((unpackNum f) == (unpackNum a)))
+  | onlyString (f:a:[]) = (Bool ((unpackString f) == (unpackString a)))
+  | onlyBools (f:a:[]) = (Bool ((unpackBool f) == (unpackBool a)))
+  | otherwise =  Error ("invalid sentence")
+equals a  = Error "wrong number of arguments"
+
+greater :: [LispVal] -> LispVal
+greater (f:a:[])
+  | onlyNumbers (f:a:[]) = (Bool ((unpackNum f) > (unpackNum a)))
+  | onlyString (f:a:[]) = (Bool ((unpackString f) > (unpackString a)))
+  | otherwise = Error ("invalid sentence")
+greater a = Error "wrong number of arguments"
+
+notEquals :: [LispVal] -> LispVal
+notEquals lista =
+  case eq of
+    err@((Error _)) -> err
+    otherwise -> (Bool (not (unpackBool (eq))))
+  where eq = (equals lista)
+
+greaterOrEquals :: [LispVal] -> LispVal
+greaterOrEquals lista =
+  case par of 
+    (_, (Bool True)) -> (Bool True)
+    ((Bool True), _) -> (Bool True)
+    ((Error _), _) -> fst(par)
+    (_, (Error _)) -> snd(par)
+    otherwise -> (Bool False)
+  where eq = (equals lista);
+        gtr = (greater lista);
+        par = (eq,gtr);
+
+less :: [LispVal] -> LispVal
+less lista =
+  case gOr of
+    ((Error _)) -> gOr
+    otherwise -> (Bool (not (unpackBool (gOr))))
+  where gOr = (greaterOrEquals lista)
+
+lessOrEquals :: [LispVal] -> LispVal
+lessOrEquals lista =
+  case gtr of
+    ((Error _)) -> gtr
+    otherwise -> (Bool (not (unpackBool (gtr))))
+  where gtr = (greater lista)
 
 car :: [LispVal] -> LispVal
 car [List (a:as)] = a
@@ -205,10 +267,26 @@ numericBinOp op args = if onlyNumbers args
 onlyNumbers :: [LispVal] -> Bool
 onlyNumbers [] = True
 onlyNumbers (Number n:ns) = onlyNumbers ns
-onlyNumbers ns = False             
+onlyNumbers ns = False  
+
+onlyBools :: [LispVal] -> Bool
+onlyBools [] = True
+onlyBools (Bool n:ns) = onlyBools ns
+onlyBools ns = False  
+
+onlyString :: [LispVal] -> Bool
+onlyString [] = True
+onlyString (String n:ns) = onlyString ns
+onlyString ns = False             
                        
 unpackNum :: LispVal -> Integer
 unpackNum (Number n) = n
+
+unpackBool :: LispVal -> Bool
+unpackBool (Bool n) = n
+
+unpackString :: LispVal -> String
+unpackString (String n) = n
 --- unpackNum a = ... -- Should never happen!!!!
 
 -----------------------------------------------------------
