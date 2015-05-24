@@ -82,8 +82,12 @@ stateLookup env var = ST $
 -- beast.
 define :: StateT -> [LispVal] -> StateTransformer LispVal
 define env [(Atom id), val] = defineVar env id val
-define env [(List [Atom id]), val] = defineVar env id val
--- define env [(List l), val]                                       
+define env [(List [Atom id]), val] = defineVar env id val   
+define env ((List ((Atom id):formals)):body:[]) = 
+ eval env (List (Atom "define":(Atom id):[(List (Atom "lambda":(List formals):body:[]))]))
+  --defineVar env id (eval env (List (Atom "lambda":(List formals):body:[])))
+  --return (List ((Atom id):(List formals):body:[]))
+  --defineVar env id lam                           
 define env args = return (Error "wrong number of arguments")
 defineVar env id val = 
   ST (\s -> let (ST f)    = eval env val
@@ -138,7 +142,11 @@ environment =
           $ insert ">="             (Native greaterOrEquals)
           $ insert "<"              (Native less)
           $ insert "<="             (Native lessOrEquals)
-
+          $ insert "It?"            (Native itFunc)
+          $ insert "/"              (Native division)
+          $ insert "mod"            (Native modFunc)
+          $ insert "comment"        (Native comment)
+          $ insert "cons"           (Native cons)
             empty
 
 type StateT = Map String LispVal
@@ -165,6 +173,19 @@ instance Monad StateTransformer where
 -- Includes some auxiliary functions. Does not include functions that modify
 -- state. These functions, such as define and set!, must run within the
 -- StateTransformer monad. 
+itFunc :: [LispVal] -> LispVal
+itFunc (f:a:[])
+  | onlyNumbers (f:a:[]) = (Bool ((unpackNum f) < (unpackNum a)))
+  | otherwise =  Error ("invalid sentence")
+itFunc a  = Error "wrong number of arguments"
+ 
+ 
+comment :: [LispVal] -> LispVal
+comment list = List []
+ 
+cons :: [LispVal] -> LispVal
+cons (f:(List a):[]) = (List ([f]++a))
+cons a = Error "invalid sentence"
 
 equals :: [LispVal] -> LispVal
 equals (f:a:[]) 
@@ -255,6 +276,14 @@ numericSub [x] = if onlyNumbers [x]
                  then (\num -> (Number (- num))) (unpackNum x)
                  else Error "not a number."
 numericSub l = numericBinOp (-) l
+
+division :: [LispVal] -> LispVal
+division [] = Number 0
+division l = numericBinOp (div) l
+ 
+modFunc :: [LispVal] -> LispVal
+modFunc [] = Number 0
+modFunc l = numericBinOp (mod) l
 
 -- We have not implemented division. Also, notice that we have not 
 -- addressed floating-point numbers.
