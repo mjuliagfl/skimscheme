@@ -62,6 +62,8 @@ eval env iff@(List (Atom "if":cond:consequent:alternate:[])) =
 -- the same semantics as redefining other functions, since define is not
 -- stored as a regular function because of its return type.
 eval env (List (Atom "define": args)) = maybe (define env args) (\v -> return v) (Map.lookup "define" env)
+eval env (List (Atom "let": (List(bindings)): body:[])) = lett env [(List (Atom "let": (List(bindings)): body:[]))]
+  --maybe (define env ((List(bindings)): body:[])) (\v -> return v) (Map.lookup "define" env)
 eval env (List (Atom func : args)) = mapM (eval env) args >>= apply env func 
 eval env (Error s)  = return (Error s)
 eval env form = return (Error ("Could not eval the special form: " ++ (show form)))
@@ -73,6 +75,27 @@ stateLookup env var = ST $
            id (Map.lookup var (union s env) 
     ), s))
 
+lett :: StateT -> [LispVal] -> StateTransformer LispVal
+lett env [(List (Atom "let": (List(bindings)): body:[]))] = 
+  (defineBindings env bindings) >> (eval env body) >>=
+    (\x -> deleteBindings env bindings x)
+
+defineBindings :: StateT -> [LispVal] -> StateTransformer LispVal
+defineBindings env [(List ([(Atom id), val]))] = defineVar env id val
+defineBindings env ((List ([(Atom id), val])):more) = (defineVar env id val) >>
+  (defineBindings env more)
+defineBindings env a = return (Error (show("invalid formula")))
+
+deleteBindings :: StateT -> [LispVal] -> LispVal -> StateTransformer LispVal
+deleteBindings env [(List ([(Atom id), val]))] final = deleteVar env id final
+deleteBindings env ((List ([(Atom id), val])):more) final = (deleteVar env id final) >>
+  (deleteBindings env more final)
+deleteBindings env a _ = return (Error (show("invalid formula")))
+deleteVar env id val = 
+  ST (\s -> let (ST f)    = eval env val
+                (result, newState) = f s
+            in (result, (delete id newState))
+     )
 
 -- Because of monad complications, define is a separate function that is not
 -- included in the state of the program. This saves  us from having to make
@@ -82,12 +105,9 @@ stateLookup env var = ST $
 -- beast.
 define :: StateT -> [LispVal] -> StateTransformer LispVal
 define env [(Atom id), val] = defineVar env id val
-define env [(List [Atom id]), val] = defineVar env id val   
+define env [(List [Atom id]), val] = defineVar env id val
 define env ((List ((Atom id):formals)):body:[]) = 
  eval env (List (Atom "define":(Atom id):[(List (Atom "lambda":(List formals):body:[]))]))
-  --defineVar env id (eval env (List (Atom "lambda":(List formals):body:[])))
-  --return (List ((Atom id):(List formals):body:[]))
-  --defineVar env id lam                           
 define env args = return (Error "wrong number of arguments")
 defineVar env id val = 
   ST (\s -> let (ST f)    = eval env val
