@@ -63,8 +63,7 @@ eval env iff@(List (Atom "if":cond:consequent:alternate:[])) =
 -- stored as a regular function because of its return type.
 eval env (List (Atom "define": args)) = maybe (define env args) (\v -> return v) (Map.lookup "define" env)
 eval env (List (Atom "let": (List(bindings)): body:[])) = lett env [(List (Atom "let": (List(bindings)): body:[]))]
-  --maybe (define env ((List(bindings)): body:[])) (\v -> return v) (Map.lookup "define" env)
-eval env (List (Atom func : args)) = mapM (eval env) args >>= apply env func 
+eval env (List (Atom func : args)) = mapM (eval env) args >>= apply env func
 eval env (Error s)  = return (Error s)
 eval env form = return (Error ("Could not eval the special form: " ++ (show form)))
 
@@ -77,20 +76,20 @@ stateLookup env var = ST $
 
 lett :: StateT -> [LispVal] -> StateTransformer LispVal
 lett env [(List (Atom "let": (List(bindings)): body:[]))] = 
-  (defineBindings env bindings) >> (eval env body) >>=
-    (\x -> deleteBindings env bindings x)
+  (defineBindings env bindings) >> (eval env body) >>= 
+    (\v -> case v of { (error@(Error _)) -> return error; otherwise -> (deleteBindings env bindings v)})
 
 defineBindings :: StateT -> [LispVal] -> StateTransformer LispVal
 defineBindings env [(List ([(Atom id), val]))] = defineVar env id val
 defineBindings env ((List ([(Atom id), val])):more) = (defineVar env id val) >>
   (defineBindings env more)
-defineBindings env a = return (Error (show("invalid formula")))
+defineBindings env a = return (Error ("invalid formula"))
 
 deleteBindings :: StateT -> [LispVal] -> LispVal -> StateTransformer LispVal
 deleteBindings env [(List ([(Atom id), val]))] final = deleteVar env id final
 deleteBindings env ((List ([(Atom id), val])):more) final = (deleteVar env id final) >>
   (deleteBindings env more final)
-deleteBindings env a _ = return (Error (show("invalid formula")))
+deleteBindings env a _ = return (Error ("invalid formula"))
 deleteVar env id val = 
   ST (\s -> let (ST f)    = eval env val
                 (result, newState) = f s
@@ -104,6 +103,9 @@ deleteVar env id val =
 -- not talking about local definitions. That's a completely different
 -- beast.
 define :: StateT -> [LispVal] -> StateTransformer LispVal
+-- Paramos aqui com relação ao closure, temos de fazer algo que retenha o env em id
+define env [(Atom id), (List ([(Atom "make-closure"), (List (Atom "lambda":(List formals):body:[]))]))] =
+  (stateLookup env "i") >>= (\x -> return (Error(show(x))))
 define env [(Atom id), val] = defineVar env id val
 define env [(List [Atom id]), val] = defineVar env id val
 define env ((List ((Atom id):formals)):body:[]) = 
@@ -114,6 +116,7 @@ defineVar env id val =
                 (result, newState) = f s
             in (result, (insert id result newState))
      )
+
 
 
 -- The maybe function yields a value of type b if the evaluation of 
@@ -311,7 +314,7 @@ modFunc l = numericBinOp (mod) l
 numericBinOp :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
 numericBinOp op args = if onlyNumbers args 
                        then Number $ foldl1 op $ Prelude.map unpackNum args 
-                       else Error "not a number."
+                       else Error("not a number.")
                        
 onlyNumbers :: [LispVal] -> Bool
 onlyNumbers [] = True
