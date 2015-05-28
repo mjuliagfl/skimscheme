@@ -63,6 +63,7 @@ eval env iff@(List (Atom "if":cond:consequent:alternate:[])) =
 -- stored as a regular function because of its return type.
 eval env (List (Atom "define": args)) = maybe (define env args) (\v -> return v) (Map.lookup "define" env)
 eval env (List (Atom "let": (List(bindings)): body:[])) = lett env [(List (Atom "let": (List(bindings)): body:[]))]
+eval env (List (Atom "set!":var:expr:[])) = eval env expr >>= (\v -> define env (var:v:[]))
 eval env (List (Atom func : args)) = mapM (eval env) args >>= apply env func
 eval env (Error s)  = return (Error s)
 eval env form = return (Error ("Could not eval the special form: " ++ (show form)))
@@ -170,6 +171,7 @@ environment =
           $ insert "mod"            (Native modFunc)
           $ insert "comment"        (Native comment)
           $ insert "cons"           (Native cons)
+          $ insert "eqv?"           (Native eqv)
             empty
 
 type StateT = Map String LispVal
@@ -225,6 +227,28 @@ greater (f:a:[])
   | otherwise = Error ("invalid sentence")
 greater a = Error "wrong number of arguments"
 
+eqv :: [LispVal] -> LispVal
+eqv ((List []):(List []):[]) = Bool True
+eqv ( (List a):(List b):[])
+  |(length a) /= (length b) = Bool False
+  |otherwise = compList a b
+eqv ((DottedList [] a):(DottedList [] b):[]) = (eqv [a, b])
+eqv ((DottedList a aa):(DottedList b bb):[])
+  |unpackBool((eqv [aa, bb])) = compList a b
+  |otherwise = Bool False
+eqv (f:a:[]) 
+  | onlyNumbers (f:a:[]) = (Bool ((unpackNum f) == (unpackNum a)))
+  | onlyString (f:a:[]) = (Bool ((unpackString f) == (unpackString a)))
+  | onlyBools (f:a:[]) = (Bool ((unpackBool f) == (unpackBool a)))
+  | otherwise =  Error ("invalid sentence")
+eqv a  = Error "wrong number of arguments"
+
+compList :: [LispVal] -> [LispVal] -> LispVal
+compList [] _ = Bool True
+compList a b
+ |unpackBool((eqv [head a, head b])) = compList (tail a) (tail b)
+ |otherwise = Bool False
+ 
 notEquals :: [LispVal] -> LispVal
 notEquals lista =
   case eq of
